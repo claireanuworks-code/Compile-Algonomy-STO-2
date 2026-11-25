@@ -561,22 +561,31 @@ def write_with_excel(template, out, data, boh):
             pass
 
 
-def find_template(*folders):
-    """Your previous finished STO allocation file (.xlsb) is the template.
-    Looks in the template folder first, then the input folder (any file with
-    'Final' in its name), then the script folder. Newest file wins."""
+def find_template(folders, exclude=()):
+    """Find your layout file (a previous finished STO allocation workbook).
+    - In any folder whose name starts with 'template': any Excel file.
+    - In the input / script folder: an Excel file whose name contains
+      'template' or 'final' (the 5 daily input files are ignored).
+    Newest file wins. Returns (file or None, list of what was checked)."""
+    exclude = {Path(f).resolve() for f in exclude}
+    checked = []
     for folder in folders:
-        if not folder or not Path(folder).exists():
+        folder = Path(folder)
+        if not folder.is_dir():
+            checked.append(f"{folder}  (folder not found)")
             continue
-        hits = [f for f in Path(folder).iterdir()
-                if f.is_file() and f.suffix.lower() in (".xlsb", ".xlsx", ".xlsm")
-                and not f.name.startswith("~$")]
-        if Path(folder).name.lower() != "template":
-            hits = [f for f in hits if "final" in norm(f.name) and "sto_allocation" in norm(f.name)]
-        if hits:
-            hits.sort(key=lambda f: f.stat().st_mtime, reverse=True)
-            return hits[0]
-    return None
+        subdirs = [d for d in folder.iterdir() if d.is_dir() and norm(d.name).startswith("template")]
+        for d in [folder] + subdirs:
+            files = [f for f in d.iterdir()
+                     if f.is_file() and f.suffix.lower() in (".xlsb", ".xlsx", ".xlsm")
+                     and not f.name.startswith("~$") and f.resolve() not in exclude]
+            checked.append(f"{d}  -> {[f.name for f in files] or 'no Excel files'}")
+            if not norm(d.name).startswith("template"):
+                files = [f for f in files if "template" in norm(f.name) or "final" in norm(f.name)]
+            if files:
+                files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
+                return files[0], checked
+    return None, checked
 
 
 def main():
@@ -624,11 +633,13 @@ def main():
         write_workbook(out, data, wms)
     else:
         here = Path(__file__).resolve().parent
-        template = find_template(args.template, args.input, here)
+        template, checked = find_template([args.template, args.input, here], exclude=files.values())
         if template is None:
-            sys.exit("\nERROR: no template found.\n"
-                     "Put a previous finished file (e.g. 11.20_Final_STO_Allocation_Orders_Article_SKU.xlsb)\n"
-                     f"into the input folder ({args.input}) and run again.")
+            print("\nERROR: no template found. Folders checked:")
+            for c in checked:
+                print("   " + c)
+            sys.exit("\nPut your layout file (a previous Final .xlsb, or one with 'template' in its name)\n"
+                     f"in {args.template} or in {args.input}, then run again.")
         out = args.output / f"{plan_date:%m.%d}_Final_STO_Allocation_Orders_Article_SKU.xlsb"
         if out.resolve() == template.resolve():
             sys.exit(f"ERROR: the template has the same name as today's output: {template.name}")
