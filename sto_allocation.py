@@ -561,13 +561,22 @@ def write_with_excel(template, out, data, boh):
             pass
 
 
-def find_template(folder: Path):
-    if not folder.exists():
-        return None
-    hits = [f for f in folder.iterdir()
-            if f.suffix.lower() in (".xlsb", ".xlsx", ".xlsm") and not f.name.startswith("~$")]
-    hits.sort(key=lambda f: f.stat().st_mtime, reverse=True)
-    return hits[0] if hits else None
+def find_template(*folders):
+    """Your previous finished STO allocation file (.xlsb) is the template.
+    Looks in the template folder first, then the input folder (any file with
+    'Final' in its name), then the script folder. Newest file wins."""
+    for folder in folders:
+        if not folder or not Path(folder).exists():
+            continue
+        hits = [f for f in Path(folder).iterdir()
+                if f.is_file() and f.suffix.lower() in (".xlsb", ".xlsx", ".xlsm")
+                and not f.name.startswith("~$")]
+        if Path(folder).name.lower() != "template":
+            hits = [f for f in hits if "final" in norm(f.name) and "sto_allocation" in norm(f.name)]
+        if hits:
+            hits.sort(key=lambda f: f.stat().st_mtime, reverse=True)
+            return hits[0]
+    return None
 
 
 def main():
@@ -609,17 +618,23 @@ def main():
         log(f"NOTE: {no_boh} article(s) not in DC BOH file -> DC BOH = 0 (WMS% 0%)")
 
     args.output.mkdir(parents=True, exist_ok=True)
-    template = find_template(args.template)
-    if template and not args.simple:
-        out = args.output / f"{plan_date:%m.%d}_Final_STO_Allocation_Orders_Article_SKU.xlsb"
-        log(f"Writing {out.name} from template {template.name} (via Excel) ...")
-        write_with_excel(template, out, data, boh)
-    else:
-        if not args.simple:
-            log(f"NOTE: no template found in {args.template} -> writing plain .xlsx instead")
+    if args.simple:
         out = args.output / f"{plan_date:%m.%d}_Final_STO_Allocation_Orders_Article_SKU.xlsx"
-        log(f"Writing {out.name} ...")
+        log(f"Writing {out.name} (plain layout, --simple) ...")
         write_workbook(out, data, wms)
+    else:
+        here = Path(__file__).resolve().parent
+        template = find_template(args.template, args.input, here)
+        if template is None:
+            sys.exit("\nERROR: no template found.\n"
+                     "Put a previous finished file (e.g. 11.20_Final_STO_Allocation_Orders_Article_SKU.xlsb)\n"
+                     f"into the input folder ({args.input}) and run again.")
+        out = args.output / f"{plan_date:%m.%d}_Final_STO_Allocation_Orders_Article_SKU.xlsb"
+        if out.resolve() == template.resolve():
+            sys.exit(f"ERROR: the template has the same name as today's output: {template.name}")
+        log(f"TEMPLATE: {template}")
+        log(f"Writing {out.name} via Excel (keeps your layout + pivot tables) ...")
+        write_with_excel(template, out, data, boh)
 
     q = data["Final Allocation Qty"]
     print("\n================ SUMMARY ================")

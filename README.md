@@ -5,7 +5,7 @@ Builds the daily **STO Allocation** workbook (Data, WMS% and Summary sheets) fro
 ## One-time setup (Windows)
 1. Install Python. During install, tick **"Add python.exe to PATH"**.
 2. Double-click **`setup.bat`**. It installs pandas, python-calamine, xlsxwriter and pywin32. `run_sto.bat` also installs anything that's missing.
-3. Put **one** finished STO allocation file (`.xlsb`, any previous day's) in the **`template`** folder. The script uses it as the layout: the Data headers, formats and the pivot tables on WMS% and Summary. Its old data is replaced every run, and the template file itself is never changed.
+3. Put a previous finished STO allocation file (`..._Final_STO_Allocation_Orders_Article_SKU.xlsb`) in the **`input`** folder (or in `template`). The script uses it as the layout: the Data headers, formats and the pivot tables on WMS% and Summary. Its old data is replaced every run, and the template file itself is never changed.
 
 ## Daily use
 1. Put the day's 5 files in the **`input`** folder and remove the previous day's files. The files are recognised by name:
