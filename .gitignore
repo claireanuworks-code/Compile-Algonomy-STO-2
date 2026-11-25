@@ -1,0 +1,9 @@
+# daily data files stay on your laptop, never in git
+input/*
+output/*
+!input/.gitkeep
+!output/.gitkeep
+*.xlsx
+*.xlsb
+*.xls
+__pycache__/
