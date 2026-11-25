@@ -4,7 +4,8 @@ Builds the daily **STO Allocation** workbook (Data, WMS% and Summary sheets) fro
 
 ## One-time setup (Windows)
 1. Install Python. During install, tick **"Add python.exe to PATH"**.
-2. Double-click **`setup.bat`**. It installs pandas, python-calamine and xlsxwriter.
+2. Double-click **`setup.bat`**. It installs pandas, python-calamine, xlsxwriter and pywin32. `run_sto.bat` also installs anything that's missing.
+3. Put **one** finished STO allocation file (`.xlsb`, any previous day's) in the **`template`** folder. The script uses it as the layout: the Data headers, formats and the pivot tables on WMS% and Summary. Its old data is replaced every run, and the template file itself is never changed.
 
 ## Daily use
 1. Put the day's 5 files in the **`input`** folder and remove the previous day's files. The files are recognised by name:
@@ -19,7 +20,7 @@ Builds the daily **STO Allocation** workbook (Data, WMS% and Summary sheets) fro
 
    Spaces, dashes and underscores count as the same character.
 2. Double-click **`run_sto.bat`**. It takes about 1–2 minutes.
-3. The result appears in **`output`** as `MM.DD_Final_STO_Allocation_Orders_Article_SKU.xlsx`. The date comes from the export's *Plan Created Date*. The console also prints a short summary and warns about any stores or articles that are missing from the lookup files.
+3. The result appears in **`output`** as `MM.DD_Final_STO_Allocation_Orders_Article_SKU.xlsb`. The date comes from the export's *Plan Created Date*. The console also prints a short summary and warns about any stores or articles that are missing from the lookup files.
 
 ## What it does
 **Data sheet:** the export columns plus the lookups below. Formula columns are written as live Excel formulas, the same ones as the template.
@@ -45,7 +46,7 @@ SOH, GIT, DC Pending and TOP 40 OOS are left blank, as in the template.
 
 **WMS% sheet:** Sum of Overwrite per article, DC BOH (`Available − Stock In Stage & Others` from the DC BOH file, 0 if the article is missing) and `WMS% = MIN(DC BOH / Sum, 100%)`.
 
-**Summary sheet:** Sum of Final Allocation Qty by article, by store, by department and by region, sorted largest first. These are values, not pivot tables.
+**How the file is produced:** Python builds the data, then opens your template in a hidden copy of Excel. It replaces the Data rows (keeping your formats), fills the formulas down, points all 5 pivot tables (WMS% and Summary) at the new data, refreshes them, fills WMS% columns E–I, and saves as `.xlsb`. Excel must be installed. With no template, or with `python sto_allocation.py --simple`, it writes a plain `.xlsx` without pivots.
 
 ## Not automated yet
 - **Row deletion.** Every exported row is kept. Because WMS% is calculated on whatever rows are in Data, totals will be higher than the manually cleaned file until the deletion rules are added.

@@ -25,7 +25,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import xlsxwriter
-from xlsxwriter.utility import xl_rowcol_to_cell
 
 FILE_PATTERNS = {
     "export": "sto_allocation_orders",
@@ -354,11 +353,232 @@ def write_workbook(path, data, wms):
     wb.close()
 
 
+# ---------------------------------------------------------------- Excel (template) writer
+# Excel constants
+XL_UP, XL_PASTE_VALUES, XL_PASTE_FORMATS = -4162, -4163, -4122
+XL_CALC_MANUAL, XL_CALC_AUTO, XL_DATABASE, XL_XLSB = -4135, -4105, 1, 50
+
+DATA_FORMULAS = {
+    "Overwrite": "=I3",
+    "WMS %": "=XLOOKUP(A3,'WMS%'!E$1:E$1048576,'WMS%'!I$1:I$1048576)",
+    "Final Allocation Qty": "=IF(AH3>=0.8,MROUND(J3*R3,AG3),MROUND(J3*R3,S3))",
+    "COMBINE Article, Store & EFFECTIVE DATE": '=CONCATENATE(AB3,"_",O3)',
+    "Combine": "=A3&E3",
+    "by PUF": "=J3*R3/AG3",
+}
+
+
+def col_letter(idx0):
+    s, n = "", idx0 + 1
+    while n:
+        n, r = divmod(n - 1, 26)
+        s = chr(65 + r) + s
+    return s
+
+
+def set_formula(rng, formula):
+    try:
+        rng.Formula2 = formula          # Excel 365 (no implicit '@')
+    except Exception:
+        rng.Formula = formula
+
+
+def write_values_file(path, data):
+    """Values-only helper workbook (no header) that Excel copies into the template."""
+    wb = xlsxwriter.Workbook(str(path), {"constant_memory": True})
+    ws = wb.add_worksheet("v")
+    cols = []
+    for c, name in enumerate(DATA_COLUMNS):
+        if name in DATA_FORMULAS:
+            continue
+        col = [clean(v) for v in data[name].tolist()]
+        if any(v is not None for v in col):
+            cols.append((c, col))
+    wnum, wstr = ws.write_number, ws.write_string
+    for i in range(len(data)):
+        for c, col in cols:
+            v = col[i]
+            if v is None:
+                continue
+            if isinstance(v, str):
+                wstr(i, c, v)
+            else:
+                wnum(i, c, v)
+    wb.close()
+
+
+def is_number(v):
+    try:
+        float(v)
+        return v is not None and not isinstance(v, bool)
+    except (TypeError, ValueError):
+        return False
+
+
+def make_room_for_pivots(ws, data):
+    """Pivots stacked in one column (e.g. Department above Region) must not overlap
+    after refresh: move a lower pivot down if the one above it will grow into it."""
+    pts = []
+    for pt in ws.PivotTables():
+        rng = pt.TableRange1
+        try:
+            field = pt.RowFields(1).SourceName
+            items = data[field].fillna("(blank)").nunique() if field in data else rng.Rows.Count
+        except Exception:
+            items = rng.Rows.Count
+        pts.append({"pt": pt, "col": rng.Column, "top": rng.Row, "rows": items + 2})  # header + items + total
+    for col in {p["col"] for p in pts}:
+        stack = sorted([p for p in pts if p["col"] == col], key=lambda p: p["top"])
+        for above, below in zip(stack, stack[1:]):
+            need = above["top"] + above["rows"] + 1  # leave one blank row
+            if below["top"] < need:
+                below["pt"].Location = f"'{ws.Name}'!${col_letter(col - 1)}${need}"
+                below["top"] = need
+
+
+def write_with_excel(template, out, data, boh):
+    """Fill the user's own template in Excel: keeps layout, formats and real pivot tables."""
+    try:
+        import win32com.client as win32
+    except ImportError:
+        sys.exit("ERROR: pywin32 is not installed. Run:  python -m pip install pywin32")
+    import os
+    import tempfile
+
+    n = len(data)
+    last = n + 2  # last Data row (row 2 = header)
+    lastcol = col_letter(len(DATA_COLUMNS) - 1)  # AM
+
+    tmp = Path(tempfile.gettempdir()) / f"sto_values_{os.getpid()}.xlsx"
+    log("  preparing values ...")
+    write_values_file(tmp, data)
+
+    xl = win32.DispatchEx("Excel.Application")  # separate Excel, won't touch your open files
+    xl.Visible = False
+    xl.DisplayAlerts = False
+    xl.ScreenUpdating = False
+    xl.EnableEvents = False
+    try:
+        log("  opening template in Excel ...")
+        wb = xl.Workbooks.Open(str(Path(template).resolve()), UpdateLinks=0, ReadOnly=True)
+        xl.Calculation = XL_CALC_MANUAL
+        ws_d = wb.Worksheets("Data")
+        ws_w = wb.Worksheets("WMS%")
+        ws_s = wb.Worksheets("Summary")
+
+        # --- Data: clear old rows, keep row 3 as the format row
+        log("  replacing Data rows ...")
+        had_filter = bool(ws_d.AutoFilterMode)
+        if had_filter:
+            ws_d.AutoFilterMode = False
+        old_last = ws_d.Cells(ws_d.Rows.Count, 1).End(XL_UP).Row
+        if old_last > 3:
+            ws_d.Range(f"A4:{lastcol}{old_last}").EntireRow.Delete()
+        ws_d.Range(f"A3:{lastcol}3").ClearContents()
+
+        vwb = xl.Workbooks.Open(str(tmp), ReadOnly=True)
+        vwb.Worksheets(1).Range(f"A1:{lastcol}{n}").Copy()
+        ws_d.Range("A3").PasteSpecial(Paste=XL_PASTE_VALUES)
+        xl.CutCopyMode = False
+        vwb.Close(SaveChanges=False)
+        if n > 1:
+            ws_d.Range(f"A3:{lastcol}3").Copy()
+            ws_d.Range(f"A4:{lastcol}{last}").PasteSpecial(Paste=XL_PASTE_FORMATS)
+            xl.CutCopyMode = False
+
+        for name, f in DATA_FORMULAS.items():
+            c = col_letter(COL[name])
+            set_formula(ws_d.Range(f"{c}3:{c}{last}"), f)
+        for c in ("T", "AC", "AD", "AE"):  # SUBTOTALs in row 1
+            if str(ws_d.Range(f"{c}1").Formula).upper().startswith("=SUBTOTAL"):
+                ws_d.Range(f"{c}1").Formula = f"=SUBTOTAL(9,{c}3:{c}{last})"
+        if had_filter:
+            ws_d.Range(f"A2:{lastcol}{last}").AutoFilter()
+        xl.Calculate()
+
+        # --- point every pivot table at the new Data range and refresh
+        log("  refreshing pivot tables ...")
+        src = f"'Data'!R2C1:R{last}C{len(DATA_COLUMNS)}"
+        make_room_for_pivots(ws_s, data)
+        pts = [pt for sh in (ws_w, ws_s) for pt in sh.PivotTables()]
+        first = None
+        for pt in pts:
+            if first is None:
+                pt.ChangePivotCache(wb.PivotCaches().Create(SourceType=XL_DATABASE, SourceData=src))
+                first = pt
+            else:
+                pt.ChangePivotCache(first.PivotCache())
+        first.PivotCache().Refresh()
+
+        # --- WMS%: copy pivot rows to E:F, then G (lookup), H (DC BOH), I (WMS%)
+        log("  filling WMS% ...")
+        old_w = ws_w.Cells(ws_w.Rows.Count, 5).End(XL_UP).Row
+        if old_w >= 4:
+            ws_w.Range(f"E4:I{old_w}").ClearContents()
+        last_a = ws_w.Cells(ws_w.Rows.Count, 1).End(XL_UP).Row
+        rows = [r for r in ws_w.Range(f"A4:B{last_a}").Value if is_number(r[0])]
+        end_w = 3 + len(rows)
+        boh_map = dict(zip(boh["art"].astype(int), boh["DC BOH"].astype(float)))
+        ws_w.Range(f"E4:F{end_w}").Value = rows
+        set_formula(ws_w.Range(f"G4:G{end_w}"), "=XLOOKUP(E4,A$1:A$1048576,C$1:C$1048576)")
+        ws_w.Range(f"H4:H{end_w}").Value = [(boh_map.get(int(float(r[0])), 0.0),) for r in rows]
+        ws_w.Range(f"I4:I{end_w}").Formula = "=MIN(H4/G4,100%)"
+        if end_w > 4:
+            ws_w.Range("E4:I4").Copy()
+            ws_w.Range(f"E5:I{end_w}").PasteSpecial(Paste=XL_PASTE_FORMATS)
+            xl.CutCopyMode = False
+        xl.Calculate()
+
+        # --- Summary pivots need the final quantities -> refresh again
+        first.PivotCache().Refresh()
+        for pt in ws_s.PivotTables():  # row-2 SUBTOTAL above each pivot
+            body = pt.DataBodyRange
+            top, bottom = body.Row, body.Row + body.Rows.Count - 2  # exclude Grand Total
+            cell = ws_s.Cells(2, body.Column)
+            if str(cell.Formula).upper().startswith("=SUBTOTAL"):
+                c = col_letter(body.Column - 1)
+                cell.Formula = f"=SUBTOTAL(9,{c}{top}:{c}{bottom})"
+
+        xl.Calculation = XL_CALC_AUTO
+        xl.Calculate()
+        ws_w.Activate()
+        ws_w.Range("A1").Select()
+        log("  saving ...")
+        if out.exists():
+            out.unlink()
+        wb.SaveAs(str(out.resolve()), FileFormat=XL_XLSB)
+        wb.Close(SaveChanges=False)
+    finally:
+        try:
+            xl.Calculation = XL_CALC_AUTO
+        except Exception:
+            pass
+        xl.ScreenUpdating = True
+        xl.Quit()
+        try:
+            tmp.unlink()
+        except Exception:
+            pass
+
+
+def find_template(folder: Path):
+    if not folder.exists():
+        return None
+    hits = [f for f in folder.iterdir()
+            if f.suffix.lower() in (".xlsb", ".xlsx", ".xlsm") and not f.name.startswith("~$")]
+    hits.sort(key=lambda f: f.stat().st_mtime, reverse=True)
+    return hits[0] if hits else None
+
+
 def main():
     here = Path(__file__).resolve().parent
     ap = argparse.ArgumentParser(description="Build the daily STO Allocation workbook")
     ap.add_argument("--input", default=here / "input", type=Path)
     ap.add_argument("--output", default=here / "output", type=Path)
+    ap.add_argument("--template", default=here / "template", type=Path,
+                    help="folder holding your STO allocation template (.xlsb)")
+    ap.add_argument("--simple", action="store_true",
+                    help="skip Excel/template and write a plain .xlsx")
     args = ap.parse_args()
     t0 = time.time()
 
@@ -389,9 +609,17 @@ def main():
         log(f"NOTE: {no_boh} article(s) not in DC BOH file -> DC BOH = 0 (WMS% 0%)")
 
     args.output.mkdir(parents=True, exist_ok=True)
-    out = args.output / f"{plan_date:%m.%d}_Final_STO_Allocation_Orders_Article_SKU.xlsx"
-    log(f"Writing {out.name} ...")
-    write_workbook(out, data, wms)
+    template = find_template(args.template)
+    if template and not args.simple:
+        out = args.output / f"{plan_date:%m.%d}_Final_STO_Allocation_Orders_Article_SKU.xlsb"
+        log(f"Writing {out.name} from template {template.name} (via Excel) ...")
+        write_with_excel(template, out, data, boh)
+    else:
+        if not args.simple:
+            log(f"NOTE: no template found in {args.template} -> writing plain .xlsx instead")
+        out = args.output / f"{plan_date:%m.%d}_Final_STO_Allocation_Orders_Article_SKU.xlsx"
+        log(f"Writing {out.name} ...")
+        write_workbook(out, data, wms)
 
     q = data["Final Allocation Qty"]
     print("\n================ SUMMARY ================")

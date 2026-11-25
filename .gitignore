@@ -7,3 +7,5 @@ output/*
 *.xlsb
 *.xls
 __pycache__/
+!template/.gitkeep
+template/*
