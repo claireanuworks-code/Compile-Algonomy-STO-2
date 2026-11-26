@@ -486,8 +486,25 @@ def repoint_pivots(wb, pts, src):
         return
     except Exception as e:
         log(f"    (shared cache update not allowed: {e}; using new caches)")
+    # one new cache shared by ALL pivots (not one copy per pivot -> keeps the file small)
+    pc = wb.PivotCaches().Create(SourceType=XL_DATABASE, SourceData=src)
+    first = None
     for pt in pts:
-        pt.ChangePivotCache(wb.PivotCaches().Create(SourceType=XL_DATABASE, SourceData=src))
+        try:
+            pt.ChangePivotCache(pc if first is None else first.PivotCache())
+        except Exception:
+            pt.ChangePivotCache(pc)
+        if first is None:
+            first = pt
+
+
+def pivot_report(wb, pts):
+    try:
+        caches = {pt.CacheIndex for pt in pts}
+        log(f"    {len(pts)} pivot tables using {len(caches)} pivot cache(s) "
+            f"(workbook has {wb.PivotCaches().Count})")
+    except Exception:
+        pass
 
 
 def refresh_pivots(pts):
@@ -574,6 +591,7 @@ def write_with_excel(template, out, data, boh):
             except Exception:
                 pass
         refresh_pivots(pts)
+        pivot_report(wb, pts)
 
         # --- WMS%: copy pivot rows to E:F, then G (lookup), H (DC BOH), I (WMS%)
         log("  filling WMS% ...")
