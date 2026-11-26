@@ -563,7 +563,7 @@ def write_with_excel(template, out, data, boh):
 
 def find_template(folders, exclude=()):
     """Find your layout file (a previous finished STO allocation workbook).
-    - In any folder whose name starts with 'template': any Excel file.
+    - In any folder with "template" in its name: any Excel file.
     - In the input / script folder: an Excel file whose name contains
       'template' or 'final' (the 5 daily input files are ignored).
     Newest file wins. Returns (file or None, list of what was checked)."""
@@ -574,13 +574,13 @@ def find_template(folders, exclude=()):
         if not folder.is_dir():
             checked.append(f"{folder}  (folder not found)")
             continue
-        subdirs = [d for d in folder.iterdir() if d.is_dir() and norm(d.name).startswith("template")]
+        subdirs = [d for d in folder.iterdir() if d.is_dir() and "template" in norm(d.name)]
         for d in [folder] + subdirs:
             files = [f for f in d.iterdir()
                      if f.is_file() and f.suffix.lower() in (".xlsb", ".xlsx", ".xlsm")
                      and not f.name.startswith("~$") and f.resolve() not in exclude]
             checked.append(f"{d}  -> {[f.name for f in files] or 'no Excel files'}")
-            if not norm(d.name).startswith("template"):
+            if not "template" in norm(d.name):
                 files = [f for f in files if "template" in norm(f.name) or "final" in norm(f.name)]
             if files:
                 files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
