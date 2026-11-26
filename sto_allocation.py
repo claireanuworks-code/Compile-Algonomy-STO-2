@@ -479,6 +479,8 @@ def source_covers(pt, last):
         sd = str(pt.PivotCache().SourceData)
     except Exception:
         return False
+    if re.search(r"!C\d+:C\d+$", sd) or re.search(r"!\$?[A-Z]{1,3}:\$?[A-Z]{1,3}$", sd):
+        return True  # whole columns
     m = re.search(r"R(\d+)C\d+:R(\d+)C\d+", sd)
     if not m:
         m = re.search(r"\$?[A-Z]{1,3}\$?(\d+):\$?[A-Z]{1,3}\$?(\d+)", sd)  # A1 style
