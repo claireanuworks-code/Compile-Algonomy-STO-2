@@ -27,7 +27,7 @@ Builds the daily **STO Allocation** workbook (Data, WMS% and Summary sheets) fro
 
 | Column | Source |
 |---|---|
-| J Overwrite | `=MAX(0,I)` (negatives become 0) |
+| J Overwrite | `=I` (Algonomy proposed qty, never changed) |
 | P Ordering Cycle | Store list → `Ordering cycle (...)` |
 | Q Cap based on vertical facing | 0 |
 | R WMS % | `XLOOKUP(article, WMS%!E, WMS%!I)` |

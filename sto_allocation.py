@@ -223,7 +223,7 @@ def build(exp, art, store, oos_keys, boh):
     d["Store LEGS"] = exp["Store LEGS"]
     d["Store Delivery Date"] = exp["Store Delivery Date"].astype(str)
     d["Planned Quantity (Selling Units)"] = to_num(exp["Planned Quantity (Selling Units)"])
-    d["Overwrite"] = d["Planned Quantity (Selling Units)"].clip(lower=0)  # no negatives
+    d["Overwrite"] = d["Planned Quantity (Selling Units)"]  # untouched: Algonomy proposed qty
     d["Planned Quantity (Buying Units)"] = to_num(exp["Planned Quantity (Buying Units)"])
     d["Unit Buying Price"] = to_num(exp["Unit Buying Price"])
     d["Order Value"] = to_num(exp["Order Value"])
@@ -373,7 +373,7 @@ def write_workbook(path, data, wms):
                 wstr(row, c, v)
             else:
                 wnum(row, c, v)
-        wf(row, cO, f"=MAX(0,I{x})", None, ov[i])
+        wf(row, cO, f"=I{x}", None, ov[i])
         wf(row, cR, f"=_xlfn.XLOOKUP(A{x},'WMS%'!E$4:E${last_w},'WMS%'!I$4:I${last_w})", pct,
            wv[i] if wv[i] is not None else "#N/A")
         wf(row, cT, f"=IF(AH{x}>=0.8,MROUND(J{x}*R{x},AG{x}),MROUND(J{x}*R{x},S{x}))",
@@ -394,7 +394,7 @@ XL_UP, XL_PASTE_VALUES, XL_PASTE_FORMATS = -4162, -4163, -4122
 XL_CALC_MANUAL, XL_CALC_AUTO, XL_DATABASE, XL_XLSB = -4135, -4105, 1, 50
 
 DATA_FORMULAS = {
-    "Overwrite": "=MAX(0,I3)",
+    "Overwrite": "=I3",
     "WMS %": "=XLOOKUP(A3,'WMS%'!E$1:E$1048576,'WMS%'!I$1:I$1048576)",
     "Final Allocation Qty": "=IF(AH3>=0.8,MROUND(J3*R3,AG3),MROUND(J3*R3,S3))",
     "COMBINE Article, Store & EFFECTIVE DATE": '=CONCATENATE(AB3,"_",O3)',
@@ -687,7 +687,7 @@ def main():
             f"{neg_boh['art'].astype(int).tolist()[:15]}")
     neg_ow = data[data["Planned Quantity (Selling Units)"] < 0]
     if len(neg_ow):
-        log(f"NOTE: {len(neg_ow)} row(s) had a NEGATIVE planned qty -> Overwrite set to 0. "
+        log(f"WARNING: {len(neg_ow)} row(s) have a NEGATIVE Overwrite (left as is) -> Final Qty will show #NUM!. "
             f"Articles: {sorted(set(neg_ow['Article (SKU)'].astype(int)))[:15]}")
     bad_uf = data[(data["SUF"] <= 0) | (data["PUF"] <= 0)]
     if len(bad_uf):
