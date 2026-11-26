@@ -162,9 +162,8 @@ def load_oos(path):
 def load_boh(path):
     df = read(path, sheet=0, header=0)
     df.columns = [str(c).strip() for c in df.columns]
-    # "Available to be pick" = Available - Stock In Stage & Others
-    atp = to_num(df["Available"]).fillna(0) - to_num(df["Stock In Stage & Others"]).fillna(0)
-    out = pd.DataFrame({"art": to_int(df["Item"]), "DC BOH": atp})
+    # DC BOH = the "Available" column of the DC BOH file (as used by the team)
+    out = pd.DataFrame({"art": to_int(df["Item"]), "DC BOH": to_num(df["Available"]).fillna(0)})
     return out.dropna(subset=["art"]).groupby("art", as_index=False)["DC BOH"].sum()
 
 
