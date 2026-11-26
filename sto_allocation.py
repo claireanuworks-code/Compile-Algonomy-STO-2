@@ -223,7 +223,7 @@ def build(exp, art, store, oos_keys, boh):
     d["Store LEGS"] = exp["Store LEGS"]
     d["Store Delivery Date"] = exp["Store Delivery Date"].astype(str)
     d["Planned Quantity (Selling Units)"] = to_num(exp["Planned Quantity (Selling Units)"])
-    d["Overwrite"] = d["Planned Quantity (Selling Units)"]
+    d["Overwrite"] = d["Planned Quantity (Selling Units)"].clip(lower=0)  # no negatives
     d["Planned Quantity (Buying Units)"] = to_num(exp["Planned Quantity (Buying Units)"])
     d["Unit Buying Price"] = to_num(exp["Unit Buying Price"])
     d["Order Value"] = to_num(exp["Order Value"])
@@ -240,7 +240,7 @@ def build(exp, art, store, oos_keys, boh):
              .agg(desc=("Article Description", "first"), total=("Overwrite", "sum"))
              .sort_values("Article (SKU)"))
     wms = wms.merge(boh.rename(columns={"art": "Article (SKU)"}), on="Article (SKU)", how="left")
-    wms["DC BOH"] = wms["DC BOH"].fillna(0)
+    wms["DC BOH"] = wms["DC BOH"].fillna(0).clip(lower=0)  # negative stock -> 0
     with np.errstate(all="ignore"):
         wms["WMS%"] = np.clip(wms["DC BOH"] / wms["total"], 0.0, 1.0)  # negative stock -> 0%
     d["WMS %"] = d["Article (SKU)"].map(wms.set_index("Article (SKU)")["WMS%"])
@@ -373,7 +373,7 @@ def write_workbook(path, data, wms):
                 wstr(row, c, v)
             else:
                 wnum(row, c, v)
-        wf(row, cO, f"=I{x}", None, ov[i])
+        wf(row, cO, f"=MAX(0,I{x})", None, ov[i])
         wf(row, cR, f"=_xlfn.XLOOKUP(A{x},'WMS%'!E$4:E${last_w},'WMS%'!I$4:I${last_w})", pct,
            wv[i] if wv[i] is not None else "#N/A")
         wf(row, cT, f"=IF(AH{x}>=0.8,MROUND(J{x}*R{x},AG{x}),MROUND(J{x}*R{x},S{x}))",
@@ -394,7 +394,7 @@ XL_UP, XL_PASTE_VALUES, XL_PASTE_FORMATS = -4162, -4163, -4122
 XL_CALC_MANUAL, XL_CALC_AUTO, XL_DATABASE, XL_XLSB = -4135, -4105, 1, 50
 
 DATA_FORMULAS = {
-    "Overwrite": "=I3",
+    "Overwrite": "=MAX(0,I3)",
     "WMS %": "=XLOOKUP(A3,'WMS%'!E$1:E$1048576,'WMS%'!I$1:I$1048576)",
     "Final Allocation Qty": "=IF(AH3>=0.8,MROUND(J3*R3,AG3),MROUND(J3*R3,S3))",
     "COMBINE Article, Store & EFFECTIVE DATE": '=CONCATENATE(AB3,"_",O3)',
@@ -576,7 +576,7 @@ def write_with_excel(template, out, data, boh):
         last_a = ws_w.Cells(ws_w.Rows.Count, 1).End(XL_UP).Row
         rows = [r for r in ws_w.Range(f"A4:B{last_a}").Value if is_number(r[0])]
         end_w = 3 + len(rows)
-        boh_map = dict(zip(boh["art"].astype(int), boh["DC BOH"].astype(float)))
+        boh_map = dict(zip(boh["art"].astype(int), boh["DC BOH"].astype(float).clip(lower=0)))
         ws_w.Range(f"E4:F{end_w}").Value = rows
         set_formula(ws_w.Range(f"G4:G{end_w}"), "=XLOOKUP(E4,A$1:A$1048576,C$1:C$1048576)")
         ws_w.Range(f"H4:H{end_w}").Value = [(boh_map.get(int(float(r[0])), 0.0),) for r in rows]
@@ -681,13 +681,13 @@ def main():
             f"{miss_art[:10]}{' ...' if len(miss_art) > 10 else ''}")
     if miss_st:
         log(f"WARNING: {len(miss_st)} store(s) not in store list: {miss_st[:20]}")
-    neg_boh = wms[wms["DC BOH"] < 0]
+    neg_boh = boh[(boh["DC BOH"] < 0) & boh["art"].isin(wms["Article (SKU)"])]
     if len(neg_boh):
-        log(f"WARNING: {len(neg_boh)} article(s) have NEGATIVE DC BOH -> WMS% set to 0%: "
-            f"{neg_boh['Article (SKU)'].astype(int).tolist()[:15]}")
-    neg_ow = data[data["Overwrite"] < 0]
+        log(f"NOTE: {len(neg_boh)} article(s) had NEGATIVE DC BOH -> set to 0: "
+            f"{neg_boh['art'].astype(int).tolist()[:15]}")
+    neg_ow = data[data["Planned Quantity (Selling Units)"] < 0]
     if len(neg_ow):
-        log(f"WARNING: {len(neg_ow)} row(s) have a NEGATIVE Overwrite -> Final Qty shows #NUM! in Excel. "
+        log(f"NOTE: {len(neg_ow)} row(s) had a NEGATIVE planned qty -> Overwrite set to 0. "
             f"Articles: {sorted(set(neg_ow['Article (SKU)'].astype(int)))[:15]}")
     bad_uf = data[(data["SUF"] <= 0) | (data["PUF"] <= 0)]
     if len(bad_uf):

@@ -27,7 +27,7 @@ Builds the daily **STO Allocation** workbook (Data, WMS% and Summary sheets) fro
 
 | Column | Source |
 |---|---|
-| J Overwrite | `=I` |
+| J Overwrite | `=MAX(0,I)` (negatives become 0) |
 | P Ordering Cycle | Store list → `Ordering cycle (...)` |
 | Q Cap based on vertical facing | 0 |
 | R WMS % | `XLOOKUP(article, WMS%!E, WMS%!I)` |
@@ -44,7 +44,7 @@ Builds the daily **STO Allocation** workbook (Data, WMS% and Summary sheets) fro
 
 SOH, GIT, DC Pending and TOP 40 OOS are left blank, as in the template.
 
-**WMS% sheet:** Sum of Overwrite per article, DC BOH (`Available − Stock In Stage & Others` from the DC BOH file, 0 if the article is missing) and `WMS% = MIN(DC BOH / Sum, 100%)`.
+**WMS% sheet:** Sum of Overwrite per article, DC BOH (`Available − Stock In Stage & Others` from the DC BOH file; 0 if the article is missing or the stock is negative) and `WMS% = MIN(DC BOH / Sum, 100%)`.
 
 **How the file is produced:** Python builds the data, then opens your template in a hidden copy of Excel. It replaces the Data rows (keeping your formats), fills the formulas down, points all 5 pivot tables (WMS% and Summary) at the new data, refreshes them, fills WMS% columns E–I, and saves as `.xlsb`. Excel must be installed. With no template, or with `python sto_allocation.py --simple`, it writes a plain `.xlsx` without pivots.
 
