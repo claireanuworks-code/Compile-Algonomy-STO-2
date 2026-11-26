@@ -402,6 +402,7 @@ DATA_FORMULAS = {
     "by PUF": "=J3*R3/AG3",
 }
 XL_MISSING_ITEMS_NONE = 0
+XL_SHIFT_DOWN, XL_FORMAT_FROM_BELOW = -4121, 1
 
 
 def col_letter(idx0):
@@ -470,6 +471,20 @@ def make_room_for_pivots(ws, data):
             if below["top"] < need:
                 below["pt"].Location = f"'{ws.Name}'!${col_letter(col - 1)}${need}"
                 below["top"] = need
+
+
+def source_covers(pt, last):
+    """True if the pivot's source range reaches the last Data row (or is whole columns)."""
+    try:
+        sd = str(pt.PivotCache().SourceData)
+    except Exception:
+        return False
+    m = re.search(r"R(\d+)C\d+:R(\d+)C\d+", sd)
+    if not m:
+        m = re.search(r"\$?[A-Z]{1,3}\$?(\d+):\$?[A-Z]{1,3}\$?(\d+)", sd)  # A1 style
+    if m:
+        return int(m.group(2)) >= last
+    return bool(re.search(r"C\d+:C\d+", sd)) or ":" not in sd  # whole columns / named range
 
 
 def repoint_pivots(wb, pts, src):
@@ -558,15 +573,17 @@ def write_with_excel(template, out, data, boh):
             ws_d.Range(f"A4:{lastcol}{old_last}").EntireRow.Delete()
         ws_d.Range(f"A3:{lastcol}3").ClearContents()
 
+        # Insert the new rows ABOVE row 3 (the format row). Inserting inside the pivot
+        # source range makes Excel stretch the pivots' source by itself (A2:AM3 -> A2:AM<last>),
+        # so the 5 pivots keep their single shared cache - no cache changes needed.
+        if n > 1:
+            ws_d.Range(f"A3:A{n + 1}").EntireRow.Insert(Shift=XL_SHIFT_DOWN, CopyOrigin=XL_FORMAT_FROM_BELOW)
+        ws_d.Range(f"A3:{lastcol}{last}").ClearContents()
         vwb = xl.Workbooks.Open(str(tmp), ReadOnly=True)
         vwb.Worksheets(1).Range(f"A1:{lastcol}{n}").Copy()
         ws_d.Range("A3").PasteSpecial(Paste=XL_PASTE_VALUES)
         xl.CutCopyMode = False
         vwb.Close(SaveChanges=False)
-        if n > 1:
-            ws_d.Range(f"A3:{lastcol}3").Copy()
-            ws_d.Range(f"A4:{lastcol}{last}").PasteSpecial(Paste=XL_PASTE_FORMATS)
-            xl.CutCopyMode = False
 
         for name, f in DATA_FORMULAS.items():
             if f:
@@ -584,7 +601,13 @@ def write_with_excel(template, out, data, boh):
         src = f"'Data'!R2C1:R{last}C{len(DATA_COLUMNS)}"
         make_room_for_pivots(ws_s, data)
         pts = [pt for sh in (ws_w, ws_s) for pt in sh.PivotTables()]
-        repoint_pivots(wb, pts, src)
+        if not all(source_covers(pt, last) for pt in pts):
+            log("    pivot source did not stretch by itself -> repointing")
+            repoint_pivots(wb, pts, src)
+        try:
+            log(f"    pivot source: {pts[0].PivotCache().SourceData}  (Data last row {last})")
+        except Exception:
+            pass
         for pt in pts:
             try:
                 pt.PivotCache().MissingItemsLimit = XL_MISSING_ITEMS_NONE  # drop old template items
