@@ -393,14 +393,15 @@ def write_workbook(path, data, wms):
 XL_UP, XL_PASTE_VALUES, XL_PASTE_FORMATS = -4162, -4163, -4122
 XL_CALC_MANUAL, XL_CALC_AUTO, XL_DATABASE, XL_XLSB = -4135, -4105, 1, 50
 
+# Live formulas in the Data sheet (the two key columns Y/AB are written as values
+# to keep the file light; WMS % is filled after the WMS% sheet, with an exact range).
 DATA_FORMULAS = {
     "Overwrite": "=I3",
-    "WMS %": "=XLOOKUP(A3,'WMS%'!E$1:E$1048576,'WMS%'!I$1:I$1048576)",
+    "WMS %": None,
     "Final Allocation Qty": "=IF(AH3>=0.8,MROUND(J3*R3,AG3),MROUND(J3*R3,S3))",
-    "COMBINE Article, Store & EFFECTIVE DATE": '=CONCATENATE(AB3,"_",O3)',
-    "Combine": "=A3&E3",
     "by PUF": "=J3*R3/AG3",
 }
+XL_MISSING_ITEMS_NONE = 0
 
 
 def col_letter(idx0):
@@ -551,8 +552,9 @@ def write_with_excel(template, out, data, boh):
             xl.CutCopyMode = False
 
         for name, f in DATA_FORMULAS.items():
-            c = col_letter(COL[name])
-            set_formula(ws_d.Range(f"{c}3:{c}{last}"), f)
+            if f:
+                c = col_letter(COL[name])
+                set_formula(ws_d.Range(f"{c}3:{c}{last}"), f)
         for c in ("T", "AC", "AD", "AE"):  # SUBTOTALs in row 1
             if str(ws_d.Range(f"{c}1").Formula).upper().startswith("=SUBTOTAL"):
                 ws_d.Range(f"{c}1").Formula = f"=SUBTOTAL(9,{c}3:{c}{last})"
@@ -566,6 +568,11 @@ def write_with_excel(template, out, data, boh):
         make_room_for_pivots(ws_s, data)
         pts = [pt for sh in (ws_w, ws_s) for pt in sh.PivotTables()]
         repoint_pivots(wb, pts, src)
+        for pt in pts:
+            try:
+                pt.PivotCache().MissingItemsLimit = XL_MISSING_ITEMS_NONE  # drop old template items
+            except Exception:
+                pass
         refresh_pivots(pts)
 
         # --- WMS%: copy pivot rows to E:F, then G (lookup), H (DC BOH), I (WMS%)
@@ -578,13 +585,16 @@ def write_with_excel(template, out, data, boh):
         end_w = 3 + len(rows)
         boh_map = dict(zip(boh["art"].astype(int), boh["DC BOH"].astype(float).clip(lower=0)))
         ws_w.Range(f"E4:F{end_w}").Value = rows
-        set_formula(ws_w.Range(f"G4:G{end_w}"), "=XLOOKUP(E4,A$1:A$1048576,C$1:C$1048576)")
+        set_formula(ws_w.Range(f"G4:G{end_w}"), f"=XLOOKUP(E4,A$4:A${last_a},C$4:C${last_a})")
         ws_w.Range(f"H4:H{end_w}").Value = [(boh_map.get(int(float(r[0])), 0.0),) for r in rows]
         ws_w.Range(f"I4:I{end_w}").Formula = "=MAX(0,MIN(H4/G4,100%))"
         if end_w > 4:
             ws_w.Range("E4:I4").Copy()
             ws_w.Range(f"E5:I{end_w}").PasteSpecial(Paste=XL_PASTE_FORMATS)
             xl.CutCopyMode = False
+        # Data!R (WMS %) looks up only the real WMS% rows -> much less lag
+        set_formula(ws_d.Range(f"R3:R{last}"),
+                    f"=XLOOKUP(A3,'WMS%'!E$4:E${end_w},'WMS%'!I$4:I${end_w})")
         xl.Calculate()
 
         # --- Summary pivots need the final quantities -> refresh again
@@ -597,6 +607,13 @@ def write_with_excel(template, out, data, boh):
                 c = col_letter(body.Column - 1)
                 cell.Formula = f"=SUBTOTAL(9,{c}{top}:{c}{bottom})"
 
+        # don't store a hidden copy of all Data rows inside the file (pivot values stay visible;
+        # Excel asks for Refresh only when you change a pivot)
+        for pt in pts:
+            try:
+                pt.PivotCache().SaveData = False
+            except Exception:
+                pass
         xl.Calculation = XL_CALC_AUTO
         xl.Calculate()
         ws_w.Activate()

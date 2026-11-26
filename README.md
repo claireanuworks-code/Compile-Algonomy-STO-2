@@ -30,12 +30,12 @@ Builds the daily **STO Allocation** workbook (Data, WMS% and Summary sheets) fro
 | J Overwrite | `=I` (Algonomy proposed qty, never changed) |
 | P Ordering Cycle | Store list → `Ordering cycle (...)` |
 | Q Cap based on vertical facing | 0 |
-| R WMS % | `XLOOKUP(article, WMS%!E, WMS%!I)` |
+| R WMS % | `XLOOKUP(article, WMS%!E, WMS%!I)` over the real WMS% rows only |
 | S SUF | Article report → `Delivery Rate against Basic UoM (SUF/IN1)` |
 | T Final Allocation Qty | `IF(AH>=0.8, MROUND(J*R, AG), MROUND(J*R, S))` |
 | U/V/W Department / Category / SUB CAT | Article report AH / AJ / AL |
 | X Child SKU? | Article report CU (Article Category) |
-| Y, AB keys | `article&store_effective-date`, `article&store` |
+| Y, AB keys | `article&store_effective-date`, `article&store` (written as values) |
 | Z LEGS, AA Region | Store list → `NEW LEGS`, `Site Hierarchy L2` |
 | AG PUF | Article report → `Ordering UOM Rate against Basic UoM (PUF)` |
 | AH by PUF | `J*R/AG` |
@@ -59,3 +59,8 @@ The console shows how many rows each rule removed.
 ## Not automated yet
 - Zeroing Final Allocation Qty on selected rows (done by hand in the 20 Nov file).
 - **Manual LEGS edits** (e.g. "(Reno Alloc - OB DL Only)") are not applied. LEGS comes straight from the store list.
+
+## File size / speed
+- Pivot caches are saved **without** a hidden copy of the source data (`SaveData = False`). The pivots still show their numbers; Excel asks for **Data → Refresh All** only when you change a pivot.
+- XLOOKUPs search only the real rows, not whole columns.
+- The key columns Y and AB are values, not formulas.
