@@ -190,13 +190,16 @@ def legs_key(v):
 def apply_deletions(d):
     """1) keep Region WM/EM only
        2) LEGS: delete NEW stores, 'Reno - Total Closure' stores (other Reno stores are KEPT),
-          CLOSED, E-Commerce, EXPO and NIL."""
+          CLOSED, E-Commerce, EXPO and NIL.
+       3) Reno stores only (LEGS contains 'Reno'): delete rows where DL = 0 AND OB = 0."""
     legs = d["LEGS"].map(legs_key)
     rules = [
         ("Region not WM/EM", ~d["Region"].isin(KEEP_REGIONS)),
         ("LEGS = NEW", legs.str.contains(r"\bNEW\b", regex=True)),
         ("LEGS = Reno - Total Closure", legs.str.contains("RENO TOTAL CLOSURE", regex=False)),
         ("LEGS = CLOSED / E-Commerce / EXPO / NIL", legs.isin(DELETE_LEGS_EXACT)),
+        ("Reno stores: DL = 0 and OB = 0", legs.str.contains("RENO", regex=False)
+            & (d["DL"].astype(str) != "X") & (d["OB"].astype(str) != "X")),
     ]
     drop = pd.Series(False, index=d.index)
     log(f"Deleting rows (start: {len(d):,}):")
