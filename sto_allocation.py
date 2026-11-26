@@ -436,6 +436,35 @@ def make_room_for_pivots(ws, data):
                 below["top"] = need
 
 
+def repoint_pivots(wb, pts, src):
+    """Point all pivot tables at the new Data range.
+    1st choice: change the source of the (shared) pivot cache in place.
+    Fallback: give each pivot table a new cache on the new range."""
+    try:
+        done = set()
+        for pt in pts:
+            idx = pt.CacheIndex
+            if idx not in done:
+                pt.PivotCache().SourceData = src
+                done.add(idx)
+        return
+    except Exception as e:
+        log(f"    (shared cache update not allowed: {e}; using new caches)")
+    for pt in pts:
+        pt.ChangePivotCache(wb.PivotCaches().Create(SourceType=XL_DATABASE, SourceData=src))
+
+
+def refresh_pivots(pts):
+    done = set()
+    for pt in pts:
+        idx = pt.CacheIndex
+        if idx not in done:
+            pt.PivotCache().Refresh()
+            done.add(idx)
+    for pt in pts:
+        pt.RefreshTable()
+
+
 def write_with_excel(template, out, data, boh):
     """Fill the user's own template in Excel: keeps layout, formats and real pivot tables."""
     try:
@@ -501,14 +530,8 @@ def write_with_excel(template, out, data, boh):
         src = f"'Data'!R2C1:R{last}C{len(DATA_COLUMNS)}"
         make_room_for_pivots(ws_s, data)
         pts = [pt for sh in (ws_w, ws_s) for pt in sh.PivotTables()]
-        first = None
-        for pt in pts:
-            if first is None:
-                pt.ChangePivotCache(wb.PivotCaches().Create(SourceType=XL_DATABASE, SourceData=src))
-                first = pt
-            else:
-                pt.ChangePivotCache(first.PivotCache())
-        first.PivotCache().Refresh()
+        repoint_pivots(wb, pts, src)
+        refresh_pivots(pts)
 
         # --- WMS%: copy pivot rows to E:F, then G (lookup), H (DC BOH), I (WMS%)
         log("  filling WMS% ...")
@@ -530,7 +553,7 @@ def write_with_excel(template, out, data, boh):
         xl.Calculate()
 
         # --- Summary pivots need the final quantities -> refresh again
-        first.PivotCache().Refresh()
+        refresh_pivots(pts)
         for pt in ws_s.PivotTables():  # row-2 SUBTOTAL above each pivot
             body = pt.DataBodyRange
             top, bottom = body.Row, body.Row + body.Rows.Count - 2  # exclude Grand Total
