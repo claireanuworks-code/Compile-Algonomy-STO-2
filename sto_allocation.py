@@ -178,6 +178,37 @@ def mround(x, m):
     return np.where((m == 0), 0, r)
 
 
+# Rows to delete (applied before WMS% is calculated)
+KEEP_REGIONS = {"WM", "EM"}
+DELETE_LEGS_EXACT = {"CLOSED", "E COMMERCE", "EXPO", "NIL"}
+
+
+def legs_key(v):
+    return re.sub(r"[\s\-]+", " ", str(v)).strip().upper()
+
+
+def apply_deletions(d):
+    """1) keep Region WM/EM only
+       2) LEGS: delete NEW stores, 'Reno - Total Closure' stores (other Reno stores are KEPT),
+          CLOSED, E-Commerce, EXPO and NIL."""
+    legs = d["LEGS"].map(legs_key)
+    rules = [
+        ("Region not WM/EM", ~d["Region"].isin(KEEP_REGIONS)),
+        ("LEGS = NEW", legs.str.contains(r"\bNEW\b", regex=True)),
+        ("LEGS = Reno - Total Closure", legs.str.contains("RENO TOTAL CLOSURE", regex=False)),
+        ("LEGS = CLOSED / E-Commerce / EXPO / NIL", legs.isin(DELETE_LEGS_EXACT)),
+    ]
+    drop = pd.Series(False, index=d.index)
+    log(f"Deleting rows (start: {len(d):,}):")
+    for name, mask in rules:
+        new = mask & ~drop
+        log(f"   - {name:42s}{int(new.sum()):>9,} rows")
+        drop |= mask
+    kept = d[~drop].reset_index(drop=True)
+    log(f"   = kept {len(kept):,} rows")
+    return kept
+
+
 def build(exp, art, store, oos_keys, boh):
     d = pd.DataFrame()
     d["Article (SKU)"] = to_int(exp["Article (SKU)"])
@@ -199,6 +230,7 @@ def build(exp, art, store, oos_keys, boh):
     d = d.merge(store.rename(columns={"st": "Store"}), on="Store", how="left")
     d = d.merge(art.rename(columns={"art": "Article (SKU)"}), on="Article (SKU)", how="left")
     d["Cap based on vertical facing"] = 0
+    d = apply_deletions(d)   # before WMS%, so WMS% is based on the kept rows only
 
     # WMS% sheet: pivot of Overwrite by article + DC BOH
     wms = (d.groupby("Article (SKU)", as_index=False)

@@ -48,6 +48,12 @@ SOH, GIT, DC Pending and TOP 40 OOS are left blank, as in the template.
 
 **How the file is produced:** Python builds the data, then opens your template in a hidden copy of Excel. It replaces the Data rows (keeping your formats), fills the formulas down, points all 5 pivot tables (WMS% and Summary) at the new data, refreshes them, fills WMS% columns E–I, and saves as `.xlsb`. Excel must be installed. With no template, or with `python sto_allocation.py --simple`, it writes a plain `.xlsx` without pivots.
 
+## Row deletion (before WMS% is calculated)
+1. Keep Region **WM** and **EM** only.
+2. Delete stores whose LEGS (from the store list) is **NEW**, **Reno - Total Closure** (other Reno stores, e.g. "Reno Alloc - OB DL Only", are kept), **CLOSED**, **E-Commerce**, **EXPO** or **NIL**.
+
+The console shows how many rows each rule removed.
+
 ## Not automated yet
-- **Row deletion.** Every exported row is kept. Because WMS% is calculated on whatever rows are in Data, totals will be higher than the manually cleaned file until the deletion rules are added.
+- Zeroing Final Allocation Qty on selected rows (done by hand in the 20 Nov file).
 - **Manual LEGS edits** (e.g. "(Reno Alloc - OB DL Only)") are not applied. LEGS comes straight from the store list.
