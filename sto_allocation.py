@@ -242,7 +242,7 @@ def build(exp, art, store, oos_keys, boh):
     wms = wms.merge(boh.rename(columns={"art": "Article (SKU)"}), on="Article (SKU)", how="left")
     wms["DC BOH"] = wms["DC BOH"].fillna(0)
     with np.errstate(all="ignore"):
-        wms["WMS%"] = np.minimum(wms["DC BOH"] / wms["total"], 1.0)
+        wms["WMS%"] = np.clip(wms["DC BOH"] / wms["total"], 0.0, 1.0)  # negative stock -> 0%
     d["WMS %"] = d["Article (SKU)"].map(wms.set_index("Article (SKU)")["WMS%"])
 
     jr = d["Overwrite"] * d["WMS %"]
@@ -298,7 +298,7 @@ def write_workbook(path, data, wms):
         ws_w.write_row(row, 4, [a, desc])
         ws_w.write_formula(row, 6, f"=_xlfn.XLOOKUP(E{row + 1},A$4:A${last_w},C$4:C${last_w})", None, total)
         ws_w.write_number(row, 7, boh)
-        ws_w.write_formula(row, 8, f"=MIN(H{row + 1}/G{row + 1},100%)", pct,
+        ws_w.write_formula(row, 8, f"=MAX(0,MIN(H{row + 1}/G{row + 1},100%))", pct,
                            clean(pctv) if pd.notna(pctv) else "#DIV/0!")
     ws_w.set_column(0, 0, 13); ws_w.set_column(1, 1, 34); ws_w.set_column(2, 2, 10)
     ws_w.set_column(4, 4, 13); ws_w.set_column(5, 5, 34); ws_w.set_column(6, 8, 10)
@@ -580,7 +580,7 @@ def write_with_excel(template, out, data, boh):
         ws_w.Range(f"E4:F{end_w}").Value = rows
         set_formula(ws_w.Range(f"G4:G{end_w}"), "=XLOOKUP(E4,A$1:A$1048576,C$1:C$1048576)")
         ws_w.Range(f"H4:H{end_w}").Value = [(boh_map.get(int(float(r[0])), 0.0),) for r in rows]
-        ws_w.Range(f"I4:I{end_w}").Formula = "=MIN(H4/G4,100%)"
+        ws_w.Range(f"I4:I{end_w}").Formula = "=MAX(0,MIN(H4/G4,100%))"
         if end_w > 4:
             ws_w.Range("E4:I4").Copy()
             ws_w.Range(f"E5:I{end_w}").PasteSpecial(Paste=XL_PASTE_FORMATS)
@@ -681,6 +681,18 @@ def main():
             f"{miss_art[:10]}{' ...' if len(miss_art) > 10 else ''}")
     if miss_st:
         log(f"WARNING: {len(miss_st)} store(s) not in store list: {miss_st[:20]}")
+    neg_boh = wms[wms["DC BOH"] < 0]
+    if len(neg_boh):
+        log(f"WARNING: {len(neg_boh)} article(s) have NEGATIVE DC BOH -> WMS% set to 0%: "
+            f"{neg_boh['Article (SKU)'].astype(int).tolist()[:15]}")
+    neg_ow = data[data["Overwrite"] < 0]
+    if len(neg_ow):
+        log(f"WARNING: {len(neg_ow)} row(s) have a NEGATIVE Overwrite -> Final Qty shows #NUM! in Excel. "
+            f"Articles: {sorted(set(neg_ow['Article (SKU)'].astype(int)))[:15]}")
+    bad_uf = data[(data["SUF"] <= 0) | (data["PUF"] <= 0)]
+    if len(bad_uf):
+        log(f"WARNING: {len(bad_uf)} row(s) have SUF or PUF <= 0 in the article report. "
+            f"Articles: {sorted(set(bad_uf['Article (SKU)'].astype(int)))[:15]}")
     if no_boh:
         log(f"NOTE: {no_boh} article(s) not in DC BOH file -> DC BOH = 0 (WMS% 0%)")
 
