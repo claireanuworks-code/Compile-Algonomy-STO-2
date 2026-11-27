@@ -16,7 +16,7 @@ Builds the daily **STO Allocation** workbook (Data, WMS% and Summary sheets) fro
 | Store list | OneDrive `Demand Planning - Documents\G. Store List` |
 | OOS RCA | OneDrive `Demand Planning - Documents\ZZZZ OOS RCA` |
 | Algonomy export | `Downloads` |
-| DC BOH | OneDrive `DC BOH` folder, filled automatically by a Power Automate flow from the "DC BOH Report" e-mail (falls back to classic Outlook) |
+| DC BOH | saved straight into `input` by a Power Automate flow (the STO folder lives in OneDrive); the flow deletes the old DC BOH first |
 
 If a file can't be found, it keeps whatever is already in `input`. Folder paths are listed at the top of `fetch_inputs.py`.
 

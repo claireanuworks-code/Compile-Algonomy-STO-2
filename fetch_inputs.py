@@ -31,7 +31,8 @@ SOURCES = {
 #  1) first looks in DC_BOH_FOLDER (e.g. a OneDrive folder where a Power Automate flow
 #     saves the e-mail attachment) - leave as None if you don't use one
 #  2) otherwise searches classic Outlook (all mailboxes + group/shared mailboxes)
-DC_BOH_FOLDER = ONEDRIVE / "DC BOH"   # filled by the Power Automate flow (set to None to use Outlook)
+DC_BOH_FOLDER = None   # another folder to copy DC BOH from (None = not used)
+DC_BOH_IN_INPUT = True  # Power Automate saves DC BOH straight into the input folder
 OUTLOOK_BOH_WORDS = ["boh"]          # attachment name must contain these
 OUTLOOK_SUBJECT_WORDS = ["dc", "boh"]  # ...or the e-mail subject must contain these
 OUTLOOK_DAYS = 7
@@ -128,6 +129,16 @@ def fetch_file(label, folder, words, recursive):
 
 
 def fetch_boh_outlook():
+    if DC_BOH_IN_INPUT:
+        log("DC BOH: saved into input by Power Automate ...")
+        have = existing(["dc", "boh"])
+        if have:
+            f = max(have, key=sort_key)
+            log(f"   using {f.name}  ({age_note(sort_key(f)[0])})")
+            if len(have) > 1:
+                log(f"   NOTE: {len(have)} DC BOH files in input - the build uses the newest one")
+            return True
+        log("   WARNING: no DC BOH file in input yet - check the Power Automate flow, trying Outlook ...")
     if DC_BOH_FOLDER:
         log(f"DC BOH: searching {DC_BOH_FOLDER} ...")
         f = newest_file(Path(DC_BOH_FOLDER), ["boh"], True)
