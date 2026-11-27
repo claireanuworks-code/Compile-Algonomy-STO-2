@@ -531,10 +531,8 @@ def refresh_pivots(pts):
     for pt in pts:
         idx = pt.CacheIndex
         if idx not in done:
-            pt.PivotCache().Refresh()
+            pt.PivotCache().Refresh()   # refreshing the cache updates all its pivot tables
             done.add(idx)
-    for pt in pts:
-        pt.RefreshTable()
 
 
 def write_with_excel(template, out, data, boh):
@@ -550,7 +548,15 @@ def write_with_excel(template, out, data, boh):
     last = n + 2  # last Data row (row 2 = header)
     lastcol = col_letter(len(DATA_COLUMNS) - 1)  # AM
 
-    tmp = Path(tempfile.gettempdir()) / f"sto_values_{os.getpid()}.xlsx"
+    # Work on LOCAL copies (outside OneDrive): Excel treats files in OneDrive folders as
+    # cloud documents (AutoSave/sync), which can crash it during the heavy pivot refresh.
+    import shutil
+    work = Path(tempfile.gettempdir()) / f"sto_build_{os.getpid()}"
+    work.mkdir(parents=True, exist_ok=True)
+    local_tpl = work / f"template{Path(template).suffix}"
+    shutil.copy2(template, local_tpl)
+    local_out = work / out.name
+    tmp = work / "values.xlsx"
     log("  preparing values ...")
     write_values_file(tmp, data)
 
@@ -561,7 +567,7 @@ def write_with_excel(template, out, data, boh):
     xl.EnableEvents = False
     try:
         log("  opening template in Excel ...")
-        wb = xl.Workbooks.Open(str(Path(template).resolve()), UpdateLinks=0, ReadOnly=True)
+        wb = xl.Workbooks.Open(str(local_tpl), UpdateLinks=0)
         xl.Calculation = XL_CALC_MANUAL
         ws_d = wb.Worksheets("Data")
         ws_w = wb.Worksheets("WMS%")
@@ -664,21 +670,32 @@ def write_with_excel(template, out, data, boh):
         ws_w.Activate()
         ws_w.Range("A1").Select()
         log("  saving ...")
+        wb.SaveAs(str(local_out), FileFormat=XL_XLSB)
+        wb.Close(SaveChanges=False)
+    except Exception as e:
+        msg = str(e)
+        if "-2147023170" in msg or "-2147023174" in msg or "RPC" in msg or "remote procedure" in msg:
+            sys.exit("\nERROR: Excel stopped responding / closed during the build.\n"
+                     "  - Close all Excel windows (and any 'Microsoft Excel' left in Task Manager)\n"
+                     "  - Then run again. If it keeps happening, restart the laptop first.")
+        raise
+    finally:
+        for step in (lambda: setattr(xl, "Calculation", XL_CALC_AUTO),
+                     lambda: setattr(xl, "ScreenUpdating", True),
+                     lambda: xl.Quit()):
+            try:
+                step()
+            except Exception:
+                pass
+    # move the finished file into the output folder
+    try:
         if out.exists():
             out.unlink()
-        wb.SaveAs(str(out.resolve()), FileFormat=XL_XLSB)
-        wb.Close(SaveChanges=False)
+        shutil.copy2(local_out, out)
+    except PermissionError:
+        sys.exit(f"\nERROR: could not write {out.name} - is it open in Excel? Close it and run again.")
     finally:
-        try:
-            xl.Calculation = XL_CALC_AUTO
-        except Exception:
-            pass
-        xl.ScreenUpdating = True
-        xl.Quit()
-        try:
-            tmp.unlink()
-        except Exception:
-            pass
+        shutil.rmtree(work, ignore_errors=True)
 
 
 def find_template(folders, exclude=()):
