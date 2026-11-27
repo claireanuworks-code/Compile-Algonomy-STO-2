@@ -27,8 +27,13 @@ SOURCES = {
     "OOS Root Cause": (ONEDRIVE / "Demand Planning - Documents" / "ZZZZ OOS RCA", ["root", "cause"], False),
     "STO Allocation Orders": (HOME / "Downloads", ["sto", "allocation", "orders"], False),
 }
-# DC BOH from Outlook: newest mail (last N days) with an attachment whose name contains these words
-OUTLOOK_BOH_WORDS = ["boh"]
+# DC BOH:
+#  1) first looks in DC_BOH_FOLDER (e.g. a OneDrive folder where a Power Automate flow
+#     saves the e-mail attachment) - leave as None if you don't use one
+#  2) otherwise searches classic Outlook (all mailboxes + group/shared mailboxes)
+DC_BOH_FOLDER = None   # e.g. ONEDRIVE / "DC BOH"
+OUTLOOK_BOH_WORDS = ["boh"]          # attachment name must contain these
+OUTLOOK_SUBJECT_WORDS = ["dc", "boh"]  # ...or the e-mail subject must contain these
 OUTLOOK_DAYS = 7
 # --------------------------------------------------------------------------
 
@@ -123,63 +128,92 @@ def fetch_file(label, folder, words, recursive):
 
 
 def fetch_boh_outlook():
+    if DC_BOH_FOLDER:
+        log(f"DC BOH: searching {DC_BOH_FOLDER} ...")
+        f = newest_file(Path(DC_BOH_FOLDER), ["boh"], True)
+        if f is not None:
+            same = INPUT / f.name
+            if not (same.exists() and same.stat().st_size == f.stat().st_size):
+                put(f.name, "DC BOH", ["dc", "boh"], lambda dest: shutil.copy2(f, dest))
+            log(f"   using {f.name}  ({age_note(sort_key(f)[0])})")
+            return True
+        log("   nothing found there, trying Outlook ...")
+
     log("DC BOH: searching Outlook ...")
     try:
         import win32com.client
         ns = win32com.client.Dispatch("Outlook.Application").GetNamespace("MAPI")
+        stores = [ns.Folders.Item(i) for i in range(1, ns.Folders.Count + 1)]
     except Exception as e:
-        log(f"   WARNING: could not open Outlook ({e}) -> keeping what is in input")
+        log(f"   WARNING: could not open classic Outlook ({e}).")
+        log("   The 'new Outlook' cannot be read by Python - switch it off (toggle at the top right)")
+        log("   or save the attachment into input by hand.")
         return False
     since = datetime.now() - timedelta(days=OUTLOOK_DAYS)
-    best = None  # (received, attachment, folder name)
+    best = None  # (received, attachment, folder path, subject)
+    scanned = []
 
-    def scan(folder, depth=0):
+    def matches(item):
+        subj = norm(getattr(item, "Subject", ""))
+        subj_ok = all(w in subj for w in OUTLOOK_SUBJECT_WORDS)
+        atts = item.Attachments
+        for i in range(1, atts.Count + 1):
+            a = atts.Item(i)
+            fn = str(a.FileName)
+            if Path(fn).suffix.lower() in EXCEL and (all(w in norm(fn) for w in OUTLOOK_BOH_WORDS) or subj_ok):
+                return a
+        return None
+
+    def scan(folder, path, depth):
         nonlocal best
+        name = str(folder.Name)
+        if norm(name) in ("deleted items", "junk email", "junk e mail", "outbox", "sent items", "drafts",
+                          "calendar", "contacts", "tasks", "notes", "journal", "conversation history"):
+            return
         try:
             items = folder.Items
             items.Sort("[ReceivedTime]", True)
-            count = 0
+            n = 0
             for item in items:
-                count += 1
-                if count > 400:
+                n += 1
+                if n > 300:
                     break
                 try:
                     rt = item.ReceivedTime
                     rt = datetime(rt.year, rt.month, rt.day, rt.hour, rt.minute, rt.second)
                 except Exception:
                     continue
-                if rt < since:
-                    break
-                if best and rt <= best[0]:
+                if rt < since or (best and rt <= best[0]):
                     break
                 try:
-                    atts = item.Attachments
+                    a = matches(item)
                 except Exception:
                     continue
-                for i in range(1, atts.Count + 1):
-                    a = atts.Item(i)
-                    fn = str(a.FileName)
-                    if Path(fn).suffix.lower() in EXCEL and all(w in norm(fn) for w in OUTLOOK_BOH_WORDS):
-                        best = (rt, a, folder.Name, str(getattr(item, "Subject", "")))
-                        break
+                if a is not None:
+                    best = (rt, a, f"{path}/{name}", str(getattr(item, "Subject", "")))
+                    break
+            scanned.append(f"{path}/{name} ({n})")
         except Exception:
             pass
-        if depth < 2:
+        if depth < 3:
             try:
                 for i in range(1, folder.Folders.Count + 1):
-                    scan(folder.Folders.Item(i), depth + 1)
+                    scan(folder.Folders.Item(i), f"{path}/{name}", depth + 1)
             except Exception:
                 pass
 
-    scan(ns.GetDefaultFolder(6))  # Inbox (+ its sub-folders)
+    for st in stores:  # your mailbox, plus any shared / group mailboxes added to Outlook
+        scan(st, "", 0)
     if best is None:
-        log(f"   WARNING: no e-mail with a BOH attachment in the last {OUTLOOK_DAYS} days -> keeping what is in input")
+        log(f"   WARNING: no e-mail with a BOH attachment in the last {OUTLOOK_DAYS} days.")
+        log(f"   Mailboxes searched: {[str(s.Name) for s in stores]}")
+        log(f"   Folders searched: {len(scanned)} (e.g. {scanned[:8]})")
         return False
-    rt, att, folder_name, subject = best
+    rt, att, where, subject = best
     ext = Path(str(att.FileName)).suffix
-    name = f"DC BOH {rt:%Y-%m-%d}{ext}"
+    name = f"DC BOH {rt:%Y-%m-%d %H%M}{ext}"
     put(name, "DC BOH", ["dc", "boh"], lambda dest: att.SaveAsFile(str(dest)))
-    log(f"   saved attachment '{att.FileName}' from '{subject}' ({folder_name}, received {rt:%d-%b %H:%M}, {age_note(rt)})")
+    log(f"   saved '{att.FileName}' from '{subject}' ({where}, received {rt:%d-%b %H:%M}, {age_note(rt)})")
     return True
 
 
