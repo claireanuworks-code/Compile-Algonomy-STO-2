@@ -6,6 +6,9 @@ python -c "import pandas, numpy, python_calamine, xlsxwriter, win32com.client" 2
   python -m pip install pandas numpy python-calamine xlsxwriter pywin32
 )
 echo.
+echo ===== Step 1: collecting input files =====
+python fetch_inputs.py
+echo ===== Step 2: building STO allocation =====
 python sto_allocation.py
 echo.
 pause

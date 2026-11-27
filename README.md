@@ -7,6 +7,19 @@ Builds the daily **STO Allocation** workbook (Data, WMS% and Summary sheets) fro
 2. Double-click **`setup.bat`**. It installs pandas, python-calamine, xlsxwriter and pywin32. `run_sto.bat` also installs anything that's missing.
 3. Put a previous finished STO allocation file (`..._Final_STO_Allocation_Orders_Article_SKU.xlsb`) in the **`input`** folder (or in `template`). The script uses it as the layout: the Data headers, formats and the pivot tables on WMS% and Summary. Its old data is replaced every run, and the template file itself is never changed.
 
+## Collecting the files automatically
+`run_sto.bat` first runs **`fetch_inputs.py`**. It copies the newest file of each type into `input` (by the date in the file name, otherwise the modified date):
+
+| File | Source |
+|---|---|
+| Article Report | OneDrive `MDM - PUBLIC - MDM\01. ARTICLE REPORT` (incl. year/month/date sub-folders) |
+| Store list | OneDrive `Demand Planning - Documents\G. Store List` |
+| OOS RCA | OneDrive `Demand Planning - Documents\ZZZZ OOS RCA` |
+| Algonomy export | `Downloads` |
+| DC BOH | Outlook: newest e-mail (last 7 days, Inbox and sub-folders) with a "BOH" Excel/CSV attachment |
+
+If a file can't be found, it keeps whatever is already in `input`. Folder paths are listed at the top of `fetch_inputs.py`.
+
 ## Daily use
 1. Put the day's 5 files in the **`input`** folder and remove the previous day's files. The files are recognised by name:
 

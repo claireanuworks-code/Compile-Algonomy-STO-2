@@ -58,7 +58,7 @@ def norm(s):
 
 def find_inputs(folder: Path):
     files = [f for f in folder.iterdir()
-             if f.is_file() and f.suffix.lower() in (".xlsx", ".xlsb", ".xls", ".xlsm")
+             if f.is_file() and f.suffix.lower() in (".xlsx", ".xlsb", ".xls", ".xlsm", ".csv")
              and not f.name.startswith("~$")]
     found = {}
     for key, pat in FILE_PATTERNS.items():
@@ -160,7 +160,10 @@ def load_oos(path):
 
 
 def load_boh(path):
-    df = read(path, sheet=0, header=0)
+    if Path(path).suffix.lower() == ".csv":
+        df = pd.read_csv(path, dtype=object)
+    else:
+        df = read(path, sheet=0, header=0)
     df.columns = [str(c).strip() for c in df.columns]
     # DC BOH = the "Available" column of the DC BOH file (as used by the team)
     out = pd.DataFrame({"art": to_int(df["Item"]), "DC BOH": to_num(df["Available"]).fillna(0)})
