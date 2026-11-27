@@ -31,7 +31,7 @@ SOURCES = {
 #  1) first looks in DC_BOH_FOLDER (e.g. a OneDrive folder where a Power Automate flow
 #     saves the e-mail attachment) - leave as None if you don't use one
 #  2) otherwise searches classic Outlook (all mailboxes + group/shared mailboxes)
-DC_BOH_FOLDER = None   # e.g. ONEDRIVE / "DC BOH"
+DC_BOH_FOLDER = ONEDRIVE / "DC BOH"   # filled by the Power Automate flow (set to None to use Outlook)
 OUTLOOK_BOH_WORDS = ["boh"]          # attachment name must contain these
 OUTLOOK_SUBJECT_WORDS = ["dc", "boh"]  # ...or the e-mail subject must contain these
 OUTLOOK_DAYS = 7
