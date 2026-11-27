@@ -63,7 +63,7 @@ SOH, GIT, DC Pending and TOP 40 OOS are left blank, as in the template.
 
 ## Row deletion (before WMS% is calculated)
 1. Keep Region **WM** and **EM** only.
-2. Delete stores whose LEGS (from the store list) is **NEW**, **Reno - Total Closure** (other Reno stores, e.g. "Reno Alloc - OB DL Only", are kept), **CLOSED**, **E-Commerce**, **EXPO** or **NIL**.
+2. Delete stores whose LEGS (from the store list) is **NEW**, **Total Closure** (any label containing it, e.g. "Reno - Total Closure" or "(Total Closure & No DSP ordering until Dec)"; other Reno stores, e.g. "Reno Alloc - OB DL Only", are kept), **CLOSED**, **E-Commerce**, **EXPO** or **NIL**.
 
 3. In **Reno stores only** (LEGS contains "Reno"), delete rows where **DL = 0 and OB = 0**.
 
