@@ -5,15 +5,17 @@ Collect today's input files into the `input` folder.
 
 For each file type it finds the most recent file in its source folder (by the
 date in the file name, otherwise the modified date) and copies it into
-`input`, replacing the older file of the same type. DC BOH is taken from the
-newest Outlook e-mail with a "BOH" attachment.
+`input`, replacing the older file of the same type.
+
+DC BOH is NOT collected here: a Power Automate flow saves it straight into
+`input` (and deletes the old one). This script only checks it is there.
 
 Edit the SOURCES section below if a folder moves.
 """
 import re
 import shutil
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 HOME = Path.home()
@@ -27,15 +29,6 @@ SOURCES = {
     "OOS Root Cause": (ONEDRIVE / "Demand Planning - Documents" / "ZZZZ OOS RCA", ["root", "cause"], False),
     "STO Allocation Orders": (HOME / "Downloads", ["sto", "allocation", "orders"], False),
 }
-# DC BOH:
-#  1) first looks in DC_BOH_FOLDER (e.g. a OneDrive folder where a Power Automate flow
-#     saves the e-mail attachment) - leave as None if you don't use one
-#  2) otherwise searches classic Outlook (all mailboxes + group/shared mailboxes)
-DC_BOH_FOLDER = None   # another folder to copy DC BOH from (None = not used)
-DC_BOH_IN_INPUT = True  # Power Automate saves DC BOH straight into the input folder
-OUTLOOK_BOH_WORDS = ["boh"]          # attachment name must contain these
-OUTLOOK_SUBJECT_WORDS = ["dc", "boh"]  # ...or the e-mail subject must contain these
-OUTLOOK_DAYS = 7
 # --------------------------------------------------------------------------
 
 EXCEL = {".xlsx", ".xlsb", ".xls", ".xlsm", ".csv"}
@@ -128,103 +121,18 @@ def fetch_file(label, folder, words, recursive):
     return True
 
 
-def fetch_boh_outlook():
-    if DC_BOH_IN_INPUT:
-        log("DC BOH: saved into input by Power Automate ...")
-        have = existing(["dc", "boh"])
-        if have:
-            f = max(have, key=sort_key)
-            log(f"   using {f.name}  ({age_note(sort_key(f)[0])})")
-            if len(have) > 1:
-                log(f"   NOTE: {len(have)} DC BOH files in input - the build uses the newest one")
-            return True
-        log("   WARNING: no DC BOH file in input yet - check the Power Automate flow, trying Outlook ...")
-    if DC_BOH_FOLDER:
-        log(f"DC BOH: searching {DC_BOH_FOLDER} ...")
-        f = newest_file(Path(DC_BOH_FOLDER), ["boh"], True)
-        if f is not None:
-            same = INPUT / f.name
-            if not (same.exists() and same.stat().st_size == f.stat().st_size):
-                put(f.name, "DC BOH", ["dc", "boh"], lambda dest: shutil.copy2(f, dest))
-            log(f"   using {f.name}  ({age_note(sort_key(f)[0])})")
-            return True
-        log("   nothing found there, trying Outlook ...")
-
-    log("DC BOH: searching Outlook ...")
-    try:
-        import win32com.client
-        ns = win32com.client.Dispatch("Outlook.Application").GetNamespace("MAPI")
-        stores = [ns.Folders.Item(i) for i in range(1, ns.Folders.Count + 1)]
-    except Exception as e:
-        log(f"   WARNING: could not open classic Outlook ({e}).")
-        log("   The 'new Outlook' cannot be read by Python - switch it off (toggle at the top right)")
-        log("   or save the attachment into input by hand.")
+def check_dc_boh():
+    """DC BOH is saved into input by Power Automate - just check it is there and how old it is."""
+    log("DC BOH: (saved into input by Power Automate)")
+    have = existing(["dc", "boh"])
+    if not have:
+        log("   WARNING: no DC BOH file in input - check the Power Automate flow (Run history),")
+        log("            or save the attachment into the input folder by hand.")
         return False
-    since = datetime.now() - timedelta(days=OUTLOOK_DAYS)
-    best = None  # (received, attachment, folder path, subject)
-    scanned = []
-
-    def matches(item):
-        subj = norm(getattr(item, "Subject", ""))
-        subj_ok = all(w in subj for w in OUTLOOK_SUBJECT_WORDS)
-        atts = item.Attachments
-        for i in range(1, atts.Count + 1):
-            a = atts.Item(i)
-            fn = str(a.FileName)
-            if Path(fn).suffix.lower() in EXCEL and (all(w in norm(fn) for w in OUTLOOK_BOH_WORDS) or subj_ok):
-                return a
-        return None
-
-    def scan(folder, path, depth):
-        nonlocal best
-        name = str(folder.Name)
-        if norm(name) in ("deleted items", "junk email", "junk e mail", "outbox", "sent items", "drafts",
-                          "calendar", "contacts", "tasks", "notes", "journal", "conversation history"):
-            return
-        try:
-            items = folder.Items
-            items.Sort("[ReceivedTime]", True)
-            n = 0
-            for item in items:
-                n += 1
-                if n > 300:
-                    break
-                try:
-                    rt = item.ReceivedTime
-                    rt = datetime(rt.year, rt.month, rt.day, rt.hour, rt.minute, rt.second)
-                except Exception:
-                    continue
-                if rt < since or (best and rt <= best[0]):
-                    break
-                try:
-                    a = matches(item)
-                except Exception:
-                    continue
-                if a is not None:
-                    best = (rt, a, f"{path}/{name}", str(getattr(item, "Subject", "")))
-                    break
-            scanned.append(f"{path}/{name} ({n})")
-        except Exception:
-            pass
-        if depth < 3:
-            try:
-                for i in range(1, folder.Folders.Count + 1):
-                    scan(folder.Folders.Item(i), f"{path}/{name}", depth + 1)
-            except Exception:
-                pass
-
-    for st in stores:  # your mailbox, plus any shared / group mailboxes added to Outlook
-        scan(st, "", 0)
-    if best is None:
-        log(f"   WARNING: no e-mail with a BOH attachment in the last {OUTLOOK_DAYS} days.")
-        log(f"   Mailboxes searched: {[str(s.Name) for s in stores]}")
-        log(f"   Folders searched: {len(scanned)} (e.g. {scanned[:8]})")
-        return False
-    rt, att, where, subject = best
-    ext = Path(str(att.FileName)).suffix
-    name = f"DC BOH {rt:%Y-%m-%d %H%M}{ext}"
-    put(name, "DC BOH", ["dc", "boh"], lambda dest: att.SaveAsFile(str(dest)))
-    log(f"   saved '{att.FileName}' from '{subject}' ({where}, received {rt:%d-%b %H:%M}, {age_note(rt)})")
+    f = max(have, key=sort_key)
+    log(f"   using {f.name}  ({age_note(sort_key(f)[0])})")
+    if len(have) > 1:
+        log(f"   NOTE: {len(have)} DC BOH files in input - the newest one is used")
     return True
 
 
@@ -234,7 +142,7 @@ def main():
     ok = True
     for label, (folder, words, rec) in SOURCES.items():
         ok &= fetch_file(label, folder, words, rec)
-    ok &= fetch_boh_outlook()
+    ok &= check_dc_boh()
     print()
     log("Files now in input:")
     for f in sorted(INPUT.iterdir()):
